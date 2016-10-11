@@ -20,6 +20,9 @@ parser.add_argument('-t', '--feature', help='filter by feature in the 3rd '
                     'column', nargs='*', default=[])
 parser.add_argument('-i', '--ident', help='identity field in last column',
                     default='ID')
+parser.add_argument('-r', '--region', nargs=2, type=int, metavar='START,END',
+                    help='extract sequence from START to END or region '
+                    '(higher number first for anti-sense strand)')
 
 
 Seq = namedtuple('Seq', 'chro, start, end, strand, ident, seq')
@@ -99,6 +102,19 @@ def main():
                             '(\d+)\s+(\d+)\s+\S+\s+([\+-])'   # from, to, _, strand
                             '\s+\S+\s+.*%s=([^;]+);?(.+)$' %  # _, ID, rest
                             args.ident)
+
+    # only a region is specified
+    if args.region:
+        r = SeqIO.read(args.fasta, 'fasta')
+        (start, end, strand) = (args.region[0], args.region[1], '+')
+        if start > end:
+            seq = str(r.seq[end-1:start].reverse_complement())
+            strand = '-'
+        else:
+            seq = str(r.seq[start-1:end])
+        print_fasta(Seq(r.id, start, end, strand, 'region', seq))
+        exit()
+
     for g in parse_gff(args.fasta, args.gff, args.padding, args.max_length,
                        args.feature):
         print_fasta(g)
