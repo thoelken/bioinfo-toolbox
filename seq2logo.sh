@@ -1,10 +1,19 @@
 #!/bin/bash
-if [ -t 0 ]; then
-    echo "USAGE: seq2logo 20 1000 <reads.fastq >logo.ps    # for length of 20 in first 1000 sequences"
+if [ ! -n "$1" ] && [ -t 0 ]; then
+    echo "USAGE: seq2logo 20 1000 <reads.fastq >logo.ps # for length 20 in first 1000 lines" >&2
+    echo "OR: seq2logo reads.fastq > logo.ps            # automatic length" >&2
     exit
 fi
-[ -n "$1" ] && l=$1 || l=20
-[ -n "$2" ] && n=$(($2 * 2)) || n=2000
+
+l=20
+n="cat - "
+f=""
+if [ -n "$1" ]; then
+    l="$1"
+    [ -f "$1" ] && l=$(grep -v '^[>\+@]' $1 | head | wc -L | awk '{print $1}') && f="$1"
+    [ -n "$2" ] && n="head -n$(($2 * 2))"
+fi
+
 awk '
 /^[>@]/ {
     fastq=sub(/@/, ">");
@@ -22,4 +31,4 @@ awk '
         getline;
         getline
     }
-}' | head -n$n | weblogo
+}' $f | $n | weblogo -c classic

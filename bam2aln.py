@@ -19,9 +19,15 @@ cli.add_argument('-t', '--threshold', help='base must have at least this '
                  default=0.6)
 cli.add_argument('-m', '--min-reads', help='minimal read coverage '
                  '(default=3)', type=int, default=3)
-
-
 args = cli.parse_args()
+
+
+TR = {' ': ' ', 'N': 'N', '-': '-', 'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'U': 'A'}
+
+
+def revcomp(seq):
+    return ''.join([TR[x.upper()] for x in seq[::-1]])
+
 
 m = re.match('^(.*):(\d+)(-|\+)(\d+)$', args.region)
 if not m:
@@ -36,6 +42,7 @@ theta = args.threshold
 sam = pysam.AlignmentFile(args.bam, 'rb')
 
 cons = ''
+qual, cov = [], []
 inserts = defaultdict(int)
 pile = sam.pileup(chro, start, end)
 for col in pile:
@@ -44,15 +51,22 @@ for col in pile:
     freq = defaultdict(int)
     # sys.stderr.write('cov @ %s: %s\n' % (col.pos, col.n))
     for read in col.pileups:
+        base = ' '
+        pos = read.query_position
         if read.is_del or read.is_refskip:
-            freq['-'] += 1
+            base = '-'
         elif read.indel:
-            pos = read.query_position
-            freq[read.alignment.query_sequence[pos:(pos+read.indel)]] += 1
+            base = read.alignment.query_sequence[pos:(pos+read.indel)]
         else:
-            freq[read.alignment.query_sequence[read.query_position]] += 1
+            base = read.alignment.query_sequence[pos]
+        freq[base] += 1
 
-    best = ['X', 0]
+    if len(freq) < 1:
+        cons += 'N'
+        qual.extend([0])
+        cov.extend([0])
+        continue
+    best = ['N', 0]
     N = sum(freq.values())
     if args.min_reads <= N:
         for c, n in freq.items():
@@ -60,16 +74,30 @@ for col in pile:
                 best = [c, n]
                 if len(c) > 1:
                     inserts[col.pos] = len(c)-1
-
     cons += best[0]
+    qual.extend(([best[1]/N] if N else [0]) * len(best[0]))
+    cov.extend([N] * len(best[0]))
+    q = [33+int(40*(best[1]/N-0.25)*4/3)] if N > 120 else [33+int(N/3*(best[1]/N-0.25)*4/3)]
+    if len(best[0]) > 1:
+        q *= len(best[0])
+    # qual.extend(q)
 
-reads = []
-offset = 0
-columns = defaultdict(list)
-for a in sam.fetch(chro, start, end):
-    reads.append(a)
-for i in range(start, end):
-    for r in reads:
-        if start <= r.reference_start and r.reference_start+r.template_length <= end:
-            print(r.cigar)
+if strand == '-':
+    cons = revcomp(cons)
+    qual = qual[::-1]
+    cov = cov[::-1]
+
+print('@consensus_quality\n%s\n+\n%s\n@consensus_coverage\n%s\n+\n%s' %
+      (cons, ''.join([chr(33+int(40*(q-0.25)*4/3)) for q in qual]),
+       cons, ''.join([chr(33+int(c/3)) if c < 120 else 'H' for c in cov])))
+
+# reads = []
+# offset = 0
+# columns = defaultdict(list)
+# for a in sam.fetch(chro, start, end):
+#     reads.append(a)
+# for i in range(start, end):
+#     for r in reads:
+#         if start <= r.reference_start and r.reference_start+r.template_length <= end:
+#             print(r.cigar)
 sam.close()
