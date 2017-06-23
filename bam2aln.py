@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import sys
 import re
 import pysam
@@ -12,8 +11,8 @@ cli = ArgumentParser(description='Convert BAM to Clustal style '
 cli.add_argument('-b', '--bam', help='BAM file (default=STDIN)')
 cli.add_argument('-r', '--region', help='reference region, e.g. chr1:7+81',
                  default='_:0+0')
-cli.add_argument('-c', '--consensus', help='print consensus only',
-                 action='store_true')
+cli.add_argument('-a', '--align', help='print line by line pseudo alignment', action='store_true')
+cli.add_argument('-c', '--consensus', help='print consensus only', action='store_true')
 cli.add_argument('-t', '--threshold', help='base must have at least this '
                  'fraction of total coverage (default=0.6)', type=float,
                  default=0.6)
@@ -29,6 +28,35 @@ def revcomp(seq):
     return ''.join([TR[x.upper()] for x in seq[::-1]])
 
 
+def make_aln(aln, start=0, end=0, antisense=False):
+    line = ''
+    pos = aln.reference_start
+    seq = aln.query_sequence
+    pairs = {r: q for q, r in aln.get_aligned_pairs()}
+    for i in range(start, end+1):
+        if i in pairs and pairs[i] is not None:
+            line += seq[pairs[i]-1]
+        else:
+            line += '-'
+    if antisense:
+        line = revcomp(line)
+    return line
+    if pos+len(seq) <= start or end <= pos:
+        return None
+    if start < pos:
+        line += '-'*(pos-start)
+    if end < pos+len(seq):
+        seq = seq[:len(seq)-(pos+len(seq)-end)]
+    if pos < start:
+        seq = seq[start-pos:]
+    line += seq
+    if len(line) < end-start:
+        line += '-'*(end-start-len(line))
+    if antisense:
+        line = revcomp(line)
+    return line
+
+
 m = re.match('^(.*):(\d+)(-|\+)(\d+)$', args.region)
 if not m:
     sys.stderr.write('ERROR: region "%s" is not valid!\n' % args.region)
@@ -41,63 +69,73 @@ theta = args.threshold
 
 sam = pysam.AlignmentFile(args.bam, 'rb')
 
-cons = ''
-qual, cov = [], []
-inserts = defaultdict(int)
-pile = sam.pileup(chro, start, end)
-for col in pile:
-    if start is not None and (col.pos < start or end < col.pos):
-        continue
-    freq = defaultdict(int)
-    # sys.stderr.write('cov @ %s: %s\n' % (col.pos, col.n))
-    for read in col.pileups:
-        base = ' '
-        pos = read.query_position
-        if read.is_del or read.is_refskip:
-            base = '-'
-        elif read.indel:
-            base = read.alignment.query_sequence[pos:(pos+read.indel)]
-        else:
-            base = read.alignment.query_sequence[pos]
-        freq[base] += 1
+if args.align:
+    print('CLUSTAL W non-standard clustalW-like output\n')
+    reads = {}
+    for col in sam.pileup(chro, start, end):
+        for read in col.pileups:
+            if read.alignment.query_name not in reads:
+                reads[read.alignment.query_name] = 1
+                line = make_aln(read.alignment, start, end, strand == '-')
+                if line is not None:
+                    print(read.alignment.query_name + '\t' + line)
 
-    if len(freq) < 1:
-        cons += 'N'
-        qual.extend([0])
-        cov.extend([0])
-        continue
-    best = ['N', 0]
-    N = sum(freq.values())
-    if args.min_reads <= N:
+if args.consensus:
+    cons = ''
+    qual, cov = [], []
+    inserts = defaultdict(int)
+    last = start
+    for col in sam.pileup(chro, start, end):
+        if start is not None and (col.pos < start or end < col.pos):
+            continue
+        if last < col.pos-1:  # skipped some columns without reads
+            cons += 'N' * (col.pos-last)
+            qual.extend([0.25] * (col.pos-last))
+            cov.extend([0] * (col.pos-last))
+        last = col.pos
+        freq = defaultdict(int)
+        for read in col.pileups:
+            base = ' '
+            pos = read.query_position
+            if read.is_del or read.is_refskip:  # deletion in query
+                base = '-'
+            elif read.indel:  # insertion in query
+                base = read.alignment.query_sequence[pos:(pos+read.indel)]
+            else:
+                base = read.alignment.query_sequence[pos]
+            freq[base] += 1
+
+        N = sum(freq.values()) if freq else 0
+        if N < args.min_reads:
+            cons += 'N'
+            qual.extend([0.25])
+            cov.extend([N])
+            continue
+        best = ['N', 1]
         for c, n in freq.items():
-            if best[1] < n and theta < n/N:
+            if best[1] < n:
                 best = [c, n]
                 if len(c) > 1:
                     inserts[col.pos] = len(c)-1
-    cons += best[0]
-    qual.extend(([best[1]/N] if N else [0]) * len(best[0]))
-    cov.extend([N] * len(best[0]))
-    q = [33+int(40*(best[1]/N-0.25)*4/3)] if N > 120 else [33+int(N/3*(best[1]/N-0.25)*4/3)]
-    if len(best[0]) > 1:
-        q *= len(best[0])
-    # qual.extend(q)
+        cons += best[0] if theta < best[1]/N else 'N'
+        qual.extend([best[1]/N] * len(best[0]))
+        cov.extend([N] * len(best[0]))
+    if last < end:
+        cons += 'N' * (end-last)
+        qual.extend([0.25] * (end-last))
+        cov.extend([0] * (end-last))
 
-if strand == '-':
-    cons = revcomp(cons)
-    qual = qual[::-1]
-    cov = cov[::-1]
+    if strand == '-':
+        cons = revcomp(cons)
+        qual = qual[::-1]
+        cov = cov[::-1]
 
-print('@consensus_quality\n%s\n+\n%s\n@consensus_coverage\n%s\n+\n%s' %
-      (cons, ''.join([chr(33+int(40*(q-0.25)*4/3)) for q in qual]),
-       cons, ''.join([chr(33+int(c/3)) if c < 120 else 'H' for c in cov])))
+    quality = ''.join([chr(33+int(40*(c/120*(q-0.25)*4/3 if c < 120 else (q-0.25)*4/3))) for q, c in zip(qual, cov)])
+    if args.align:
+        print('consensus\t%s\nidentity\t%s\ncoverage\t%s' % (cons, quality, quality))
+        #      (cons, ''.join([chr(33+int(40*(q-0.25)*4/3)) for q in qual]),
+        #        ''.join([chr(33+int(c/3)) if c < 120 else 'I' for c in cov])))
+    else:
+        print('@consensus %s\n%s\n+\n%s' % (args.region, cons, quality))
 
-# reads = []
-# offset = 0
-# columns = defaultdict(list)
-# for a in sam.fetch(chro, start, end):
-#     reads.append(a)
-# for i in range(start, end):
-#     for r in reads:
-#         if start <= r.reference_start and r.reference_start+r.template_length <= end:
-#             print(r.cigar)
 sam.close()
