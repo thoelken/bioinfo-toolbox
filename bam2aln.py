@@ -22,6 +22,7 @@ args = cli.parse_args()
 
 
 TR = {' ': ' ', 'N': 'N', '-': '-', 'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'U': 'A'}
+CIGAR = ['M', 'I', 'D', 'N', 'S', 'H', 'P', '=', 'X', 'B']
 
 
 def revcomp(seq):
@@ -33,28 +34,30 @@ def make_aln(aln, start=0, end=0, antisense=False):
     pos = aln.reference_start
     seq = aln.query_sequence
     pairs = {r: q for q, r in aln.get_aligned_pairs()}
+    cigar = ''.join([CIGAR[a]*n for a, n in aln.cigartuples])
+    cigar = {pos+i: a for i, a in enumerate(cigar)}
     for i in range(start, end+1):
-        if i in pairs and pairs[i] is not None:
+        if i in pairs and pairs[i] is not None and i in cigar and cigar[i] != 'S':
             line += seq[pairs[i]-1]
         else:
             line += '-'
     if antisense:
         line = revcomp(line)
     return line
-    if pos+len(seq) <= start or end <= pos:
-        return None
-    if start < pos:
-        line += '-'*(pos-start)
-    if end < pos+len(seq):
-        seq = seq[:len(seq)-(pos+len(seq)-end)]
-    if pos < start:
-        seq = seq[start-pos:]
-    line += seq
-    if len(line) < end-start:
-        line += '-'*(end-start-len(line))
-    if antisense:
-        line = revcomp(line)
-    return line
+    # if pos+len(seq) <= start or end <= pos:
+    #     return None
+    # if start < pos:
+    #     line += '-'*(pos-start)
+    # if end < pos+len(seq):
+    #     seq = seq[:len(seq)-(pos+len(seq)-end)]
+    # if pos < start:
+    #     seq = seq[start-pos:]
+    # line += seq
+    # if len(line) < end-start:
+    #     line += '-'*(end-start-len(line))
+    # if antisense:
+    #     line = revcomp(line)
+    # return line
 
 
 m = re.match('^(.*):(\d+)(-|\+)(\d+)$', args.region)
@@ -87,7 +90,7 @@ if args.consensus:
     last = start
     for col in sam.pileup(chro, start, end):
         if start is not None and (col.pos < start or end < col.pos):
-            continue
+            continue  # skip columns out of range
         if last < col.pos-1:  # skipped some columns without reads
             cons += 'N' * (col.pos-last)
             qual.extend([0.25] * (col.pos-last))
@@ -130,7 +133,10 @@ if args.consensus:
         qual = qual[::-1]
         cov = cov[::-1]
 
-    quality = ''.join([chr(33+int(40*(c/120*(q-0.25)*4/3 if c < 120 else (q-0.25)*4/3))) for q, c in zip(qual, cov)])
+    def qual_trans(q, c):
+        return chr(33+int(40*(c/120*(q-0.25)*4/3 if c < 120 else (q-0.25)*4/3)))
+
+    quality = ''.join([qual_trans(q, c) for q, c in zip(qual, cov)])
     if args.align:
         print('consensus\t%s\nidentity\t%s\ncoverage\t%s' % (cons, quality, quality))
         #      (cons, ''.join([chr(33+int(40*(q-0.25)*4/3)) for q in qual]),

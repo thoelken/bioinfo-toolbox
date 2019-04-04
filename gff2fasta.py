@@ -37,6 +37,8 @@ GENOME_PATTERN = re.compile('gi\|\d+\|ref\|(NC_\d+\.\d+)\|\s*.*')
 
 
 def parse_gff_line(line):
+    if line.startswith('#'):
+        return None
     m = GFF_PATTERN.match(line)
     if m:
         chro = m.group(1)
