@@ -63,15 +63,13 @@ class Feature:
                 start <= self.start <= end)
 
     def distance(self, start, end):
-        if self.end < start:
+        if self.end < start:  # 1--|  |--2
             return start - self.end
-        if end < self.start:
-            return end - self.start
-        if start < self.end:
-            return start - self.end
-        if self.start < end:
+        if end < self.start:  # 2--|  |--1
             return self.start - end
-        return start - self.end
+        if start < self.end or self.start < end:  # 1--|==|--2
+            return max(self.start, start) - min(self.end, end)
+        return end - start  # |=====|
 
     def contains(self, start, end):
         return self.start <= start <= end <= self.end
@@ -127,6 +125,13 @@ class GFF:
                 f = Feature(l)
                 if f.chro not in self.chromosomes:
                     self.chromosomes.append(f.chro)
+                if f.name in self.features:
+                    old = self.features[f.name]
+                    f.children = old.children
+                    f.parents = old.parents
+                    if f.type == 'CDS':
+                        f.start = min(f.start, old.start)
+                        f.end = max(f.end, old.end)
 
                 if f.type == 'gene':
                     last_gene = f.name
@@ -135,19 +140,14 @@ class GFF:
                 else:
                     if not f.parents:
                         f.parents.append(last_gene)
+                    self.parents[f.name] = []
                     for p in f.parents:
-                        self.parents[f.name] = p
+                        self.parents[f.name].append(p)
                         if p not in self.features:
                             self.features[p] = f.fake_parent()
                         self.children[p].append(f.name)
                         self.features[p].children.append(f.name)
 
-                if f.name in self.features:
-                    old = self.features[f.name]
-                    f.children = old.children
-                    if f.type == 'CDS':
-                        f.start = min(f.start, old.start)
-                        f.end = max(f.end, old.end)
                 self.features[f.name] = f
 
     def get_genes(self, chro, strand=None, start=None, end=None):
@@ -162,20 +162,17 @@ class GFF:
                 start <= x.start <= x.end <= end]
 
     def get_transcripts_from_gene(self, gene):
-        if isinstance(gene, str):
-            gene = self.features[gene]
+        gene = self.features[gene] if isinstance(gene, str) else gene
         return [self.features[t] for t in gene.children if self.features[t].type == 'mRNA']
 
     def get_exons_from_transcript(self, transcript, sort_by_direction=True):
-        if isinstance(transcript, str):
-            transcript = self.features[transcript]
-        exons = [self.features[x] for x in transcript.children if self.features[x].type == 'exon']
+        t = self.features[transcript] if isinstance(transcript, str) else transcript
+        exons = [self.features[x] for x in t.children if self.features[x].type == 'exon']
         return sorted(exons, key=lambda x: x.start,
-                      reverse=(not transcript.is_sense() and sort_by_direction))
+                      reverse=(not t.is_sense() and sort_by_direction))
 
     def get_unique_exons_from_gene(self, gene, sort_by_direction=True):
-        if isinstance(gene, str):
-            gene = self.features[gene]
+        gene = self.features[gene] if isinstance(gene, str) else gene
         exons = {str(e.start)+' '+str(e.end): e for t in self.get_transcripts_from_gene(gene)
                  for e in self.get_exons_from_transcript(t.name)}
         return sorted(exons.values(), key=lambda x: x.start,
@@ -185,21 +182,25 @@ class GFF:
         return self.get_unique_exons_from_gene(gene, sort_by_direction)
 
     def get_CDS_from_transcript(self, transcript):
-        return [self.features[x] for x in transcript.children if self.features[x].type == 'CDS']
+        t = self.features[transcript] if isinstance(transcript, str) else transcript
+        return [self.features[x] for x in t.children if self.features[x].type == 'CDS']
 
     def get_annotation_from_transcript(self, transcript, pos):
-        if pos < transcript.start or transcript.end < pos:
-            return 'intragenic'
-        if not [e for e in self.get_exons_from_transcript(transcript) if e.start <= pos <= e.end]:
+        t = self.features[transcript] if isinstance(transcript, str) else transcript
+        if pos < t.start and t.is_sense() or t.end < pos and not t.is_sense():
+            return 'upstream'
+        if pos < t.start and not t.is_sense() or t.end < pos and t.is_sense():
+            return 'downstream'
+        if not [e for e in self.get_exons_from_transcript(t) if e.start <= pos <= e.end]:
             return 'intronic'
-        cds = self.get_CDS_from_transcript(transcript)
+        cds = self.get_CDS_from_transcript(t)
         if not cds:
             return 'exonic'
         start = min([c.start for c in cds])
         end = max([c.end for c in cds])
-        if pos < start and transcript.is_sense() or not transcript.is_sense() and end < pos:
+        if pos < start and t.is_sense() or not t.is_sense() and end < pos:
             return '5UTR'
-        if pos < start and not transcript.is_sense() or transcript.is_sense() and end < pos:
+        if pos < start and not t.is_sense() or t.is_sense() and end < pos:
             return '3UTR'
         return 'CDS'
 

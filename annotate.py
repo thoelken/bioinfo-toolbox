@@ -16,7 +16,9 @@ for line in sys.stdin:
         print(line+'\t.\t.\t0\t.\t.')
         continue
     annot_start, annot_end = 'genic', 'genic'
-    for t in genome.get_transcripts_from_gene(gene):
+    transcripts = genome.get_transcripts_from_gene(gene)
+    if transcripts:
+        t = sorted(transcripts, key=lambda x: x.distance(start, end))[0]
         annot_start = genome.get_annotation_from_transcript(t, start)
         annot_end = genome.get_annotation_from_transcript(t, end)
     dist, sym = gene.distance(start, end), gene.attr['gene_symbol']
