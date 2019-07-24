@@ -21,5 +21,15 @@ for line in sys.stdin:
         t = sorted(transcripts, key=lambda x: x.distance(start, end))[0]
         annot_start = genome.get_annotation_from_transcript(t, start)
         annot_end = genome.get_annotation_from_transcript(t, end)
+    else:
+        if start < gene.start:
+            annot_start = 'upstream' if gene.is_sense() else 'downstream'
+        if end < gene.start:
+            annot_end = 'upstream' if gene.is_sense() else 'downstream'
+        if gene.end < end:
+            annot_end = 'downstream' if gene.is_sense() else 'upstream'
+        if gene.end < start:
+            annot_start = 'downstream' if gene.is_sense() else 'upstream'
     dist, sym = gene.distance(start, end), gene.attr['gene_symbol']
+
     print('%s\t%s\t%s\t%d\t%s\t%s' % (line, gene.name, sym, dist, annot_start, annot_end))

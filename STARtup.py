@@ -25,6 +25,7 @@ cli.add_argument('--sam', choices=['sam', 'bam', 'none'], default='bam', type=st
                  metavar='sam|bam|none', help='output format of Alignment [bam]')
 cli.add_argument('--unsort', action='store_true',
                  help='alignment is NOT sorted by coordinate (less RAM)')
+cli.add_argument('-u', '--unmapped', action='store_true', help='write unmapped reads to extra file')
 cli.add_argument('-m', '--multimap', default=10, type=int, metavar='N',
                  help='generate only alignments for reads that map at most N times')
 cli.add_argument('-p', '--passthrough', default='',
@@ -32,15 +33,19 @@ cli.add_argument('-p', '--passthrough', default='',
 args = cli.parse_args()
 
 if len(args.reads) > 2:
-    sys.stderr.write('ERROR: more than 2 read files given!')
+    sys.stderr.write('ERROR: more than 2 read files given!\n')
     quit()
 
 out = ''
 if args.outprefix:
     out = args.outprefix
+    if not out.endswith('.'):
+        out += '.'
 else:
     out = args.reads[0]
-    out = + out[0:out.find('.', out.rfind('/'))] + '.STAR.'
+    if out.endswith('.gz'):
+        out = out[0:-2]
+    out = out[0:out.rfind('.', out.rfind('/'))] + '.STAR.'
 outprefix = '--outFileNamePrefix ' + out + ' '
 
 gzip = ''
@@ -50,13 +55,10 @@ if r.endswith('.gz') or r.endswith('zip'):
 elif r.endswith('.bz2'):
     gzip = '--readFilesCommand bzcat '
 
-quant = ('--quantMode GeneCounts ') if args.quant else ''
-annot = ('--sjdbGTFfile %s ' % args.annotation) if args.annotation else ''
-multi = ('--outFilterMultimapNmax %d ' % args.multimap) if args.multimap else ''
-
 fmt = '--outSAMtype '
 if args.sam.lower() == 'sam':
     fmt += 'SAM '
+    args.unsort = True
 elif args.sam.lower() == 'bam':
     fmt += 'BAM '
 elif args.sam.lower() == 'none':
@@ -66,28 +68,47 @@ fmt += 'Unsorted ' if args.unsort else 'SortedByCoordinate '
 gdir = args.index if args.index else args.reference + '.STAR'
 if gdir.endswith('/'):
     gdir = gdir[:-1]
+
+params = '--runThreadN %d --genomeDir %s ' % (args.threads, gdir)
+params += args.passthrough + ' '
+params += ('--sjdbGTFfile %s ' % args.annotation) if args.annotation else ''
+
 if not os.path.isdir(gdir):
     os.mkdir(gdir)
-if args.overwrite_index or not os.path.exists(gdir + '/SAindex'):
-    cmd = ('STAR --runMode genomeGenerate --runThreadN %d --genomeDir %s '
-           '--genomeFastaFiles %s %s%s' %
-           (args.threads, gdir, args.reference, annot, args.passthrough))
-    sys.stderr.write('\ncould not find index for "%s" ...\n' % args.reference)
-    sys.stderr.write('creating new one under "%s" using the following command:\n\n' % gdir)
+if not os.path.exists(gdir + '/SAindex'):
+    sys.stderr.write('\n[STARtup] Could not find index for "%s" ...\n' % args.reference)
+    args.overwrite_index = True
+if args.overwrite_index:
+    cmd = ('STAR --runMode genomeGenerate --genomeFastaFiles %s %s' % (args.reference, params))
+    sys.stderr.write('[STARtup] Creating new index "%s" with command:\n\n' % gdir)
     sys.stderr.write(cmd + '\n\n')
-    os.system(cmd)
+    if not os.system(cmd) == 0:
+    	sys.stderr.write('ERROR: STAR index could not be generated!\n')
+    	quit()
 
 reads = ' '.join(args.reads)
-cmd = ('STAR %s%s%s%s%s%s%s --runThreadN %d --genomeDir %s --readFilesIn %s' %
-       (outprefix, fmt, annot, quant, multi, gzip, args.passthrough, args.threads, gdir, reads))
-
-sys.stderr.write('\nrunning STAR with the following parameters:\n')
+params += gzip
+params += outprefix
+params += '--quantMode GeneCounts ' if args.quant else ''
+params += ('--outFilterMultimapNmax %d ' % args.multimap) if args.multimap else ''
+params += '--outReadsUnmapped Fastx ' if args.unmapped else ''
+params += fmt
+params += '--readFilesIn %s' % ' '.join(args.reads)
+cmd = 'STAR %s' % params
+sys.stderr.write('\n[STARtup] Running STAR with the following parameters:\n')
 sys.stderr.write(cmd + '\n\n')
-os.system(cmd)
+if not os.system(cmd) == 0:
+    sys.stderr.write('ERROR: STAR mapping not successfull!\n')
+    quit()
 
+if args.sam.lower() == 'sam':
+    if args.unsort:
+        os.rename(out+'Aligned.out.sam', out+'sam')
+    else:
+        os.rename(out+'Aligned.sortedByCoord.out.sam', out+'sam')
 if args.sam.lower() == 'bam' and not args.unsort:
     os.rename(out+'Aligned.sortedByCoord.out.bam', out+'bam')
-    sys.stderr.write('\nlet me index that BAM for you ...\n')
+    sys.stderr.write('\n[STARtup] Let me index that BAM for you ...\n')
     try:
         os.system('samtools index %sbam' % out)
     except OSError:
