@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser as AP
 import sys
+import locale
 
-cli = AP('Multijoin - joins sorted files on one column')
+cli = AP('Multijoin', description='joins sorted files on one column')
 cli.add_argument('-c', '--column', type=int, default=1, metavar='N',
                  help='column number to be joined on')
 cli.add_argument('-d', '--delimiter', default='\t', metavar='STR',
@@ -19,7 +20,7 @@ lines = [f.readline().rstrip().split(args.delimiter) for f in files]
 lines = [(l.pop(args.column), l) for l in lines]
 keys, values = map(list, zip(*lines))
 while files:
-    ordered = sorted(keys)
+    ordered = sorted(keys, key=locale.strxfrm)
     for c in ordered:
         current = c
         if c:
