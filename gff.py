@@ -293,7 +293,7 @@ class GFF:
         if end is None:
             end = start
         s, e, offset = start, end, 0
-        while(True):
+        while(offset < 1000000):
             s = s - offset if offset < s else 1
             e += offset
             genes = self.get_genes(chro, strand, s, e)
@@ -309,3 +309,4 @@ class GFF:
                     return genes[0]
                 return sorted(genes, key=lambda x: x.end-x.start)[0]  # give the shortest feature
             offset += 1000  # next round with wider window
+        return None

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-
 import sys
+from signal import signal, SIGPIPE, SIG_DFL
+signal(SIGPIPE, SIG_DFL)
 
 
 def qual_print(c, q):
@@ -29,4 +30,3 @@ for l in sys.stdin:
         for i in range(0, len(s)):
             qual_print(s[i], q[i])
         sys.stdout.write('\t\033[0m\n')
-

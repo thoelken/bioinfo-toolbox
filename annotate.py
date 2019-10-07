@@ -10,7 +10,7 @@ for line in sys.stdin:
     line = line.rstrip()
     c = line.split('\t')
     chro, start, end = c[0], int(c[1]), int(c[2])
-    strand = None if len(c) < 6 else c[5]
+    strand = None
     gene = genome.get_closest_feature(chro, start, end, strand)
     if gene is None:
         print(line+'\t.\t.\t0\t.\t.')

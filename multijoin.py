@@ -19,6 +19,7 @@ files = [open(f) for f in args.files]
 lines = [f.readline().rstrip().split(args.delimiter) for f in files]
 lines = [(l.pop(args.column), l) for l in lines]
 keys, values = map(list, zip(*lines))
+last = ''
 while files:
     ordered = sorted(keys, key=locale.strxfrm)
     for c in ordered:
@@ -27,6 +28,9 @@ while files:
             break
     if not current:
         break
+    if sorted([current, last], key=locale.strxfrm)[0] == current:
+        sys.stderr.write('something is fishy with the order of %s and %s\n' % (current, last))
+    last = current
     sys.stdout.write(current)
     for i in range(len(files)):
         sys.stdout.write(args.delimiter)
