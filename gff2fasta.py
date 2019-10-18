@@ -58,18 +58,6 @@ def parse_gff_line(line):
 def parse_gff(fasta_name, gff=sys.stdin, padding=0, maxlen=0, typefilter=[]):
     fasta_seqs = SeqIO.to_dict(SeqIO.parse(fasta_name, 'fasta'))
 
-    # sanitizing chromosome names
-    tmp = dict()
-    changed = 0
-    for f in fasta_seqs:
-        m = GENOME_PATTERN.match(f)
-        if m:
-            tmp[m.group(1)] = fasta_seqs[f]
-            sys.stderr.write('found GI for refseq %s\n' % f)
-            changed = 1
-    if changed == 1:
-        fasta_seqs = tmp
-
     if gff == sys.stdin:
         sys.stderr.write("GFF input:")
     for line in gff:
@@ -93,13 +81,11 @@ def parse_gff(fasta_name, gff=sys.stdin, padding=0, maxlen=0, typefilter=[]):
 
 
 def print_fasta(seq):
-    print(">%s|%d-%d|%s|%s\n%s\n" % (seq.chro, seq.start, seq.end, seq.strand,
-                                     seq.ident, seq.seq))
+    print(">%s|%d-%d|%s|%s\n%s" % (seq.chro, seq.start, seq.end, seq.strand, seq.ident, seq.seq))
 
 
-def main():
+if __name__ == "__main__":
     args = parser.parse_args()
-    global ID_PATTERN
     ID_PATTERN = re.compile('^(\S+)\s+\S+\s+(\S+)\s+'         # chro, _, type
                             '(\d+)\s+(\d+)\s+\S+\s+([\+-])'   # from, to, _, strand
                             '\s+\S+\s+.*%s=([^;]+);?(.+)$' %  # _, ID, rest
@@ -120,7 +106,3 @@ def main():
     for g in parse_gff(args.fasta, args.gff, args.padding, args.max_length,
                        args.feature):
         print_fasta(g)
-
-
-if __name__ == "__main__":
-    main()
