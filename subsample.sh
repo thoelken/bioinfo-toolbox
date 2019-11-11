@@ -1,4 +1,5 @@
 #!/bin/bash
+# FASTQ subsampling based on http://userweb.eng.gla.ac.uk/umer.ijaz/bioinformatics/subsampling_reads.pdf
 set -euo pipefail
 if [[ $# -lt 2 || $1 == "-h" ]]; then
     echo "USAGE: $(basename $0) K FILE [FILE2]"
