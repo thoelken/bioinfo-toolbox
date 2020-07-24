@@ -150,9 +150,9 @@ class GFF:
 
                 self.features[f.name] = f
 
-    def get_genes(self, chro, strand=None, start=None, end=None):
-        g = self.children[chro]
-        g = [self.features[x] for x in g if strand is None or self.features[x].strand == strand]
+    def get_genes(self, chro=None, strand=None, start=None, end=None):
+        chros = self.children.keys() if chro is None else [chro]
+        g = [self.features[x] for c in chros for x in self.children[c] if strand is None or self.features[x].strand == strand]
         if start is None:
             return g
         if end is None:
@@ -208,16 +208,17 @@ class GFF:
         return self.get_genes(feature.chro, feature.start, feature.end, feature.strand)
 
     def overlap(self, start, end, genes):
-        return [self.features[g] for g in genes if start <= self.features[g].start < end or
-                start < self.features[g].end <= end or
-                self.features[g].start <= start <= end <= self.features[g].end]
+        return [g for g in genes if start <= g.start < end or
+                start < g.end <= end or
+                g.start <= start <= end <= g.end]
 
     def is_exonic(self, chro, start, end=None, strand=None):
         if end is None:
             end = start
         for g in self.overlap(start, end, self.get_genes(chro, strand)):
             for t in g.children:
-                for e in t.children:
+                for e in self.features[t].children:
+                    e = self.features[e]
                     if e.type == 'exon' and e.start <= start <= e.end:
                         start_found = True
                     if e.type == 'exon' and e.start <= end <= e.end:
